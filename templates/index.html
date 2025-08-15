@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DNS Spoofing Detector</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            background-color: #e2e6ea;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 0.75rem;
+        }
+
+        h1 {
+            font-weight: 600;
+            color: #1c1e21;
+            margin-bottom: 1rem;
+            font-size: 1.75rem;
+        }
+
+        .log-box {
+            background-color: #ffffff;
+            border-radius: 6px;
+            padding: 0.5rem 0.75rem;
+            max-height: 70vh;
+            overflow-y: auto;
+            box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+            font-family: monospace;
+            font-size: 0.75rem;
+            white-space: pre-wrap;
+            line-height: 1;
+        }
+
+        .log-line {
+            margin: 0;
+            padding: 0.05rem 0;
+            line-height: 1;
+        }
+
+        @keyframes blink {
+            0% { background-color: #ff4d4d; }
+            50% { background-color: #ffffff; }
+            100% { background-color: #ff4d4d; }
+        }
+
+        .log-line.alert {
+            color: #b30000;
+            font-weight: bold;
+            font-size: 0.9rem;
+            background-color: #ff4d4d;
+            animation: blink 1s infinite;
+            border-left: 5px solid red;
+            padding-left: 0.5rem;
+        }
+
+        .log-line.ok { color: #198754; }
+
+        .btn-group .btn {
+            margin-right: 0.2rem;
+            font-size: 0.85rem;
+            padding: 0.25rem 0.5rem;
+        }
+
+        .form-control {
+            border-radius: 4px;
+            font-size: 0.85rem;
+            padding: 0.3rem 0.6rem;
+        }
+
+        .control-panel .form-control,
+        .control-panel .btn {
+            margin-bottom: 0.2rem;
+        }
+
+        @media (min-width: 768px) {
+            .control-panel .form-control {
+                margin-bottom: 0;
+            }
+        }
+
+        .alert-banner {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 9999;
+            background-color: #ff0000;
+            color: #ffffff;
+            font-size: 1.25rem;
+            font-weight: bold;
+            text-align: center;
+            padding: 0.5rem;
+            animation: blink 1s infinite;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top alert banner -->
+<div id="topAlertBanner" class="alert-banner d-none">
+    🚨 DNS Spoofing ALERT Detected!
+</div>
+<audio id="siren" src="{{ url_for('static', filename='siren.mp3') }}" preload="auto"></audio>
+<div class="container">
+    <h1 class="text-center mb-3">DNS Spoofing Detector</h1>
+
+    <div class="row control-panel align-items-center mb-3 g-2">
+        <div class="col-md-3">
+            <input type="text" id="domainSearch" class="form-control form-control-sm" placeholder="Search domain...">
+        </div>
+        <div class="col-md-4">
+            <input type="text" id="dateRange" class="form-control form-control-sm" placeholder="Filter by date & time...">
+        </div>
+        <div class="col-md-5 text-md-end">
+            <div class="btn-group flex-wrap">
+                <button id="refreshBtn" class="btn btn-sm btn-outline-warning" onclick="toggleRefresh()">⏸ Pause</button>
+                <a href="/?alerts=false" class="btn btn-sm btn-outline-primary">Show All</a>
+                <a href="/?alerts=true" class="btn btn-sm btn-outline-danger">Only Alerts</a>
+                <!-- Inside .btn-group in your control panel -->
+                <button class="btn btn-sm btn-outline-dark" id="muteBtn" onclick="muteAlert()">🔇 Mute</button>
+
+                <button class="btn btn-sm btn-outline-success" onclick="exportFilteredLogs()">Export</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="logContainer" class="log-box">
+        {% for line in log.splitlines() %}
+            <div class="log-line {% if '[ALERT]' in line %}alert{% elif '[OK]' in line %}ok{% endif %}">{{ line }}</div>
+        {% endfor %}
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script>
+    let autoRefresh=true;
+    let interval;
+    const refreshInterval=5000;
+
+    const refreshBtn=document.getElementById('refreshBtn');
+    const domainInput=document.getElementById('domainSearch');
+    const dateRangeInput=document.getElementById('dateRange');
+    const logContainer=document.getElementById('logContainer');
+    const siren=document.getElementById('siren');
+    const topAlertBanner=document.getElementById('topAlertBanner');
+
+    let allLogLines=[];
+    let lastPlayedAlertTimestamps=new Set(); 
+
+    window.onload=()=>{
+        const savedScrollTop=sessionStorage.getItem('scrollTop');
+        if(savedScrollTop){
+            logContainer.scrollTop=savedScrollTop;
+            sessionStorage.removeItem('scrollTop');
+        }
+
+        allLogLines=Array.from(document.querySelectorAll('.log-line')).map(line=>({
+            text:line.textContent,
+            html:line.outerHTML,
+            date:extractDateFromLog(line.textContent)
+        }));
+
+        const prevAlertTexts=JSON.parse(sessionStorage.getItem('prevAlertTexts')||'[]');
+        const currentAlerts=allLogLines.filter(entry=>entry.text.includes('[ALERT]'));
+        const newAlerts=currentAlerts.filter(entry=>!prevAlertTexts.includes(entry.text));
+
+        if(newAlerts.length>0){
+            newAlerts.forEach(alert=>playBeep(alert.text)); 
+            topAlertBanner.classList.remove('d-none');
+            setTimeout(()=>topAlertBanner.classList.add('d-none'),10000);
+        }
+
+        sessionStorage.setItem('prevAlertTexts',JSON.stringify(currentAlerts.map(a=>a.text)));
+        interval=setInterval(reloadWithScroll,refreshInterval);
+    };
+
+    function toggleRefresh(){
+        autoRefresh=!autoRefresh;
+        refreshBtn.textContent=autoRefresh?'⏸ Pause':'▶ Resume';
+        if(autoRefresh){
+            interval=setInterval(reloadWithScroll,refreshInterval);
+        }else{
+            clearInterval(interval);
+        }
+    }
+
+    async function reloadWithScroll(){
+        const scrollTopBefore=logContainer.scrollTop;
+
+        const response=await fetch('/logs');
+        if(!response.ok) return;
+
+        const html=await response.text();
+        logContainer.innerHTML=html;
+
+        allLogLines=Array.from(document.querySelectorAll('.log-line')).map(line=>({
+            text:line.textContent,
+            html:line.outerHTML,
+            date:extractDateFromLog(line.textContent)
+        }));
+
+        const prevAlertTexts=JSON.parse(sessionStorage.getItem('prevAlertTexts')||'[]');
+        const currentAlerts=allLogLines.filter(entry=>entry.text.includes('[ALERT]'));
+        const newAlerts=currentAlerts.filter(entry=>!prevAlertTexts.includes(entry.text));
+
+        if(newAlerts.length>0){
+            newAlerts.forEach(alert=>playBeep(alert.text));
+            topAlertBanner.classList.remove('d-none');
+            setTimeout(()=>topAlertBanner.classList.add('d-none'),10000);
+        }
+
+        sessionStorage.setItem('prevAlertTexts',JSON.stringify(currentAlerts.map(a=>a.text)));
+        filterLogs(false);
+
+        logContainer.scrollTop=scrollTopBefore;
+    }
+
+    flatpickr("#dateRange",{
+        mode:"range",
+        enableTime:true,
+        dateFormat:"Y-m-d H:i",
+        onChange:filterLogs
+    });
+
+    domainInput.addEventListener('input',filterLogs);
+
+    function filterLogs(resetScroll=true){
+        const domain=domainInput.value.toLowerCase();
+        const range=dateRangeInput.value.split(" to ");
+        const start=range[0]?new Date(range[0]):null;
+        const end=range[1]?new Date(range[1]):null;
+
+        const filteredLogs=allLogLines.filter(entry=>{
+            const domainMatch=entry.text.toLowerCase().includes(domain);
+            const timeMatch=(!start||!entry.date||entry.date>=start)&&
+                            (!end||!entry.date||entry.date<=end);
+            return domainMatch&&timeMatch;
+        });
+
+        logContainer.innerHTML=filteredLogs.map(entry=>{
+            const isAlert=entry.text.includes('[ALERT]');
+            const isOK=entry.text.includes('[OK]');
+            const cssClass=isAlert?'alert':isOK?'ok':'';
+            return `<div class="log-line ${cssClass}">${entry.text}</div>`;
+        }).join('');
+
+        if(resetScroll){
+            setTimeout(()=>logContainer.scrollTo({top:0,behavior:'smooth'}),0);
+        }
+    }
+
+    function extractDateFromLog(text){
+        const match=text.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+        return match?new Date(match[0]):null;
+    }
+
+    function exportFilteredLogs(){
+        const visibleLines=Array.from(logContainer.querySelectorAll('.log-line'))
+            .map(line=>line.textContent)
+            .join('\n');
+
+        const blob=new Blob([visibleLines],{type:"text/plain;charset=utf-8"});
+        const link=document.createElement('a');
+        link.href=URL.createObjectURL(blob);
+        link.download="filtered_logs.txt";
+        link.click();
+    }
+
+    function playBeep(alertText){
+        if(lastPlayedAlertTimestamps.has(alertText)) return;
+
+        siren.play().catch(err=>console.error("Audio play failed:",err));
+        lastPlayedAlertTimestamps.add(alertText);
+    }
+    function muteAlert(){
+        siren.pause();
+        siren.currentTime=0;
+    }
+</script>
