@@ -1,5 +1,5 @@
 import threading
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, Response
 from flask_socketio import SocketIO
 from sniffer import DNSMonitor, packet_queue
 import logging
@@ -9,6 +9,8 @@ import models
 import sys
 import socket
 import time
+import os
+import json
 
 # --- Configuration ---
 app = Flask(__name__)
@@ -51,6 +53,50 @@ def get_history():
     logs = models.get_recent_logs(limit=200)
     return jsonify(logs)
 
+@app.route('/api/stats')
+def get_stats():
+    """API Endpoint to fetch real-time dynamic stats for the dashboard."""
+    # 1. Deployment Zone (Get active interface)
+    interface = config.get_active_interface()
+    
+    # 2. Threat Intel (Count IPs in the dynamic blacklist)
+    blacklist_count = 0
+    if os.path.exists("dynamic_blacklist.json"):
+        try:
+            with open("dynamic_blacklist.json", "r") as f:
+                blacklist_count = len(json.load(f))
+        except Exception:
+            pass
+            
+    # 3. Heuristic Engine (Count how many total alerts we've blocked recently)
+    logs = models.get_recent_logs(limit=1000)
+    alerts_blocked = sum(1 for log in logs if log.get('status') == 'alert')
+
+    return jsonify({
+        "zone": interface,
+        "threat_intel": blacklist_count,
+        "alerts_blocked": alerts_blocked
+    })
+
+@app.route('/api/export')
+def export_csv():
+    """API Endpoint to export logs as a CSV file for compliance auditing."""
+    logs = models.get_recent_logs(limit=10000) # Fetch up to 10,000 recent logs
+    
+    def generate():
+        # Yield the CSV Headers
+        yield "ID,Timestamp,Domain,Detected_IP,Status,Message\n"
+        # Yield each row
+        for log in logs:
+            # Wrap message in quotes to prevent commas in the message from breaking the CSV
+            yield f"{log.get('id', '')},{log.get('timestamp', '')},{log.get('domain', '')},{log.get('ip', '')},{log.get('status', '')},\"{log.get('message', '')}\"\n"
+            
+    return Response(
+        generate(), 
+        mimetype='text/csv', 
+        headers={'Content-Disposition': 'attachment; filename=nids_audit_log.csv'}
+    )
+
 def get_local_ip():
     """Finds the local IP address for the dashboard URL"""
     try:
@@ -64,7 +110,7 @@ def get_local_ip():
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print("DNS SPOOF DETECTOR - STANDARD THREADING MODE")
+    print("DNS SPOOF DETECTOR - ENTERPRISE SOC NODE")
     print("="*50 + "\n")
 
     # Initialize Database

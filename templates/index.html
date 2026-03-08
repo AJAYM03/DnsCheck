@@ -1,93 +1,155 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <title>Enterprise DNS Guard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0d1117; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .text-accent { color: #58a6ff; }
+        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 10px; }
+        .card-header { background-color: #21262d !important; border-bottom: 1px solid #30363d; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; font-size: 0.85rem;}
         
-        /* Live Monitor Styles */
-        .log-container { height: 70vh; overflow-y: scroll; background: white; border-radius: 8px; padding: 10px; border: 1px solid #ddd; }
-        .log-entry { padding: 8px; border-bottom: 1px solid #eee; animation: fadeIn 0.5s; font-size: 0.9rem; }
+        .log-container { height: 60vh; overflow-y: scroll; background: #010409; border-radius: 0 0 10px 10px; padding: 15px; font-family: 'Consolas', 'Courier New', monospace; }
+        .log-entry { padding: 8px 12px; margin-bottom: 6px; border-radius: 4px; animation: fadeIn 0.4s; font-size: 0.9rem; border-left: 4px solid transparent; }
         
-        /* Status Colors */
-        .log-alert { background-color: #ffebee; color: #c62828; border-left: 5px solid #c62828; font-weight: bold; }
-        .log-ok { color: #2e7d32; border-left: 5px solid #2e7d32; }
-        .log-warning { color: #f9a825; border-left: 5px solid #f9a825; }
+        .log-alert { background-color: rgba(248, 81, 73, 0.1); color: #ff7b72; border-left-color: #f85149; box-shadow: 0 0 10px rgba(248,81,73,0.1); }
+        .log-ok { color: #3fb950; border-left-color: #2ea043; }
+        .log-warning { color: #d29922; border-left-color: #bb8009; }
         
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* History Table Styles */
-        .table-container { height: 70vh; overflow-y: scroll; background: white; border-radius: 8px; padding: 10px; }
-        .status-badge { font-size: 0.8em; padding: 5px 10px; border-radius: 12px; color: white; }
-        .bg-alert { background-color: #c62828; }
-        .bg-ok { background-color: #2e7d32; }
-        .bg-warning { background-color: #f9a825; }
+        .table-container { height: 60vh; overflow-y: scroll; padding: 0; }
+        .table { margin-bottom: 0; font-size: 0.9rem; }
+        .table thead th { background-color: #21262d; border-bottom: 2px solid #30363d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.8rem;}
+        .status-badge { font-size: 0.75em; padding: 4px 8px; border-radius: 4px; font-weight: bold; letter-spacing: 0.5px;}
+        .bg-alert { background-color: rgba(248, 81, 73, 0.2); color: #ff7b72; border: 1px solid rgba(248, 81, 73, 0.4); }
+        .bg-ok { background-color: rgba(46, 160, 67, 0.2); color: #3fb950; border: 1px solid rgba(46, 160, 67, 0.4); }
+        .bg-warning { background-color: rgba(187, 128, 9, 0.2); color: #d29922; border: 1px solid rgba(187, 128, 9, 0.4); }
 
-        /* Connection Indicator */
-        .connection-status {
-            width: 15px;
-            height: 15px;
-            display: inline-block;
-            border-radius: 50%;
-            margin-right: 5px;
+        .connection-status { width: 12px; height: 12px; display: inline-block; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+        .status-connected { background-color: #3fb950; box-shadow: 0 0 8px #3fb950; animation: pulse-green 2s infinite; }
+        .status-disconnected { background-color: #f85149; box-shadow: 0 0 8px #f85149; }
+        
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.7); }
+            70% { box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
         }
-        .status-connected { background-color: #2e7d32; box-shadow: 0 0 5px #2e7d32; }
-        .status-disconnected { background-color: #c62828; box-shadow: 0 0 5px #c62828; }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #010409; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #58a6ff; }
+        
+        .chart-container { position: relative; height: 350px; width: 100%; display: flex; justify-content: center; align-items: center;}
     </style>
 </head>
 <body>
-    <div class="container mt-4">
-        <h2 class="text-center mb-4">🛡️ DNS Spoofing Detection System</h2>
+    <div class="container mt-4 mb-5">
+        <header class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom border-secondary">
+            <h2 class="mb-0 fw-bold"><span class="text-accent">NIDS</span> | Edge Security Node</h2>
+            <div>
+                <span id="conn-dot" class="connection-status status-disconnected"></span>
+                <span id="conn-text" class="text-uppercase fw-bold text-muted" style="font-size: 0.85rem; letter-spacing: 1px;">Offline</span>
+            </div>
+        </header>
+
+        <div class="row mb-4 text-center">
+            <div class="col-md-4">
+                <div class="card py-3">
+                    <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.8rem;">Deployment Zone</h6>
+                    <h4 class="mb-0 text-white font-monospace" id="stat-zone">...</h4>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card py-3">
+                    <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.8rem;">Threats Blocked</h6>
+                    <h4 class="mb-0 text-danger fw-bold" id="stat-blocked">...</h4>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card py-3">
+                    <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.8rem;">Threat Intel (Malicious IPs)</h6>
+                    <h4 class="mb-0 text-accent fw-bold" id="stat-intel">...</h4>
+                </div>
+            </div>
+        </div>
         
-        <ul class="nav nav-tabs" id="myTab" role="tablist">
+        <ul class="nav nav-tabs border-secondary mb-3" id="myTab" role="tablist">
             <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="live-tab" data-bs-toggle="tab" data-bs-target="#live" type="button" role="tab">📡 Live Monitor</button>
+                <button class="nav-link active fw-bold text-white" id="live-tab" data-bs-toggle="tab" data-bs-target="#live" type="button" role="tab" style="border-color: #30363d #30363d transparent;">📡 Live Monitor</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab" onclick="loadHistory()">📜 Attack History</button>
+                <button class="nav-link fw-bold text-muted" id="analytics-tab" data-bs-toggle="tab" data-bs-target="#analytics" type="button" role="tab" onclick="loadHistory()" style="border-color: transparent;">📊 Threat Analytics</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link fw-bold text-muted" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab" onclick="loadHistory()" style="border-color: transparent;">📜 Forensic Audit</button>
             </li>
         </ul>
 
-        <div class="tab-content mt-3" id="myTabContent">
+        <div class="tab-content" id="myTabContent">
             
             <div class="tab-pane fade show active" id="live" role="tabpanel">
-                <div class="card shadow-sm">
-                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                        <span>Real-Time Traffic</span>
-                        <div>
-                            <span id="conn-dot" class="connection-status status-disconnected"></span>
-                            <span id="conn-text" class="small">Disconnected</span>
-                        </div>
+                <div class="card shadow-lg">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Terminal Output</span>
+                        <span class="badge bg-secondary">Port 53 (UDP)</span>
                     </div>
                     <div class="card-body log-container" id="log-box">
-                        <div class="text-muted text-center mt-5" id="waiting-msg">Waiting for traffic...</div>
+                        <div class="text-muted text-center mt-5" id="waiting-msg">
+                            <div class="spinner-border text-secondary spinner-border-sm mb-2" role="status"></div><br>
+                            Awaiting network packet ingestion...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="analytics" role="tabpanel">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card shadow-lg h-100">
+                            <div class="card-header text-center">Traffic Distribution</div>
+                            <div class="card-body chart-container">
+                                <canvas id="trafficDoughnutChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card shadow-lg h-100">
+                            <div class="card-header text-center">Top Targeted Domains</div>
+                            <div class="card-body chart-container">
+                                <canvas id="domainBarChart"></canvas>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div class="tab-pane fade" id="history" role="tabpanel">
-                <div class="card shadow-sm">
-                    <div class="card-header bg-secondary text-white">
-                        <span>Database Records (Last 200)</span>
-                        <button class="btn btn-sm btn-light float-end" onclick="loadHistory()">Refresh</button>
+                <div class="card shadow-lg">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Database Records</span>
+                        <div>
+                            <button class="btn btn-sm btn-outline-light me-2" onclick="loadHistory()">Refresh Table</button>
+                            <a href="/api/export" class="btn btn-sm btn-primary">Export to CSV</a>
+                        </div>
                     </div>
                     <div class="card-body table-container">
-                        <table class="table table-striped table-hover">
+                        <table class="table table-dark table-striped table-hover align-middle">
                             <thead>
                                 <tr>
-                                    <th>Time</th>
-                                    <th>Domain</th>
-                                    <th>Detected IP</th>
+                                    <th>Timestamp</th>
+                                    <th>Domain Queried</th>
+                                    <th>Resolved IP</th>
                                     <th>Status</th>
-                                    <th>Details</th>
+                                    <th>Heuristic Assessment</th>
                                 </tr>
                             </thead>
-                            <tbody id="history-table-body">
-                                </tbody>
+                            <tbody id="history-table-body"></tbody>
                         </table>
                     </div>
                 </div>
@@ -105,18 +167,38 @@
         const connDot = document.getElementById('conn-dot');
         const connText = document.getElementById('conn-text');
         const waitingMsg = document.getElementById('waiting-msg');
+        
+        // Chart instances
+        let doughnutChart = null;
+        let barChart = null;
+
+        // --- Fetch Dynamic Stats for Top Cards ---
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const stats = await res.json();
+                document.getElementById('stat-zone').innerText = stats.zone || 'Unknown';
+                document.getElementById('stat-blocked').innerText = stats.alerts_blocked;
+                document.getElementById('stat-intel').innerText = stats.threat_intel;
+            } catch (error) {
+                console.error("Failed to load stats", error);
+            }
+        }
+        // Fetch stats on load and every 10 seconds
+        fetchStats();
+        setInterval(fetchStats, 10000);
 
         // --- WebSocket Connection Handling ---
         socket.on('connect', () => {
-            console.log("Connected to WebSocket");
             connDot.className = 'connection-status status-connected';
-            connText.textContent = "Live";
+            connText.textContent = "Monitoring";
+            connText.className = "text-uppercase fw-bold text-success";
         });
 
         socket.on('disconnect', () => {
-            console.log("Disconnected from WebSocket");
             connDot.className = 'connection-status status-disconnected';
-            connText.textContent = "Disconnected (Reconnecting...)";
+            connText.textContent = "Offline";
+            connText.className = "text-uppercase fw-bold text-danger";
         });
 
         socket.on('new_log', (data) => {
@@ -131,15 +213,17 @@
 
             div.className = cssClass;
             div.innerHTML = `
-                <span class="text-muted">[${data.timestamp}]</span> 
-                <strong>${data.domain}</strong> &rarr; ${data.ip} 
+                <span style="color: #8b949e;">[${data.timestamp}]</span> 
+                <span class="fw-bold text-white">${data.domain}</span> &rarr; ${data.ip} 
                 <span class="float-end">${data.message}</span>
             `;
-
             logBox.prepend(div);
+            
+            // Auto-refresh stats if a new packet comes in
+            fetchStats();
         });
 
-        // --- History API ---
+        // --- History & Analytics API ---
         async function loadHistory() {
             try {
                 const response = await fetch('/api/history');
@@ -147,35 +231,128 @@
                 
                 const logs = await response.json();
                 
-                historyTableBody.innerHTML = ''; // Clear table
-                
+                // 1. Populate Table
+                historyTableBody.innerHTML = ''; 
                 if (logs.length === 0) {
-                    historyTableBody.innerHTML = '<tr><td colspan="5" class="text-center">No records found</td></tr>';
-                    return;
+                    historyTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No records found in the database.</td></tr>';
+                } else {
+                    logs.forEach(log => {
+                        let badgeClass = 'bg-secondary';
+                        if (log.status === 'alert') badgeClass = 'bg-alert';
+                        else if (log.status === 'ok') badgeClass = 'bg-ok';
+                        else if (log.status === 'warning') badgeClass = 'bg-warning';
+
+                        const row = `
+                            <tr>
+                                <td class="text-muted">${log.timestamp}</td>
+                                <td class="fw-bold">${log.domain}</td>
+                                <td class="font-monospace">${log.ip}</td>
+                                <td><span class="status-badge ${badgeClass}">${log.status.toUpperCase()}</span></td>
+                                <td class="text-muted" style="font-size: 0.85rem;">${log.message}</td>
+                            </tr>
+                        `;
+                        historyTableBody.innerHTML += row;
+                    });
                 }
-
-                logs.forEach(log => {
-                    let badgeClass = 'bg-secondary';
-                    if (log.status === 'alert') badgeClass = 'bg-alert';
-                    else if (log.status === 'ok') badgeClass = 'bg-ok';
-                    else if (log.status === 'warning') badgeClass = 'bg-warning';
-
-                    const row = `
-                        <tr>
-                            <td>${log.timestamp}</td>
-                            <td>${log.domain}</td>
-                            <td>${log.ip}</td>
-                            <td><span class="status-badge ${badgeClass}">${log.status.toUpperCase()}</span></td>
-                            <td class="text-muted small">${log.message}</td>
-                        </tr>
-                    `;
-                    historyTableBody.innerHTML += row;
-                });
+                
+                // 2. Render Analytics Charts
+                renderCharts(logs);
+                
             } catch (error) {
                 console.error("Error fetching history:", error);
-                historyTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error loading history: ${error.message}</td></tr>`;
+                historyTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">Error loading history: ${error.message}</td></tr>`;
             }
         }
+
+        // --- Render Chart.js Analytics ---
+        function renderCharts(logs) {
+            Chart.defaults.color = '#8b949e'; // Dark theme text color
+
+            // Calculate Doughnut Data (Status breakdown)
+            let cleanCount = 0;
+            let maliciousCount = 0;
+            
+            // Calculate Bar Data (Top Domains attacked)
+            const domainCounts = {};
+
+            logs.forEach(log => {
+                if(log.status === 'ok') cleanCount++;
+                if(log.status === 'alert') {
+                    maliciousCount++;
+                    domainCounts[log.domain] = (domainCounts[log.domain] || 0) + 1;
+                }
+            });
+
+            // 1. Render Traffic Doughnut Chart
+            const ctxDoughnut = document.getElementById('trafficDoughnutChart').getContext('2d');
+            if(doughnutChart) doughnutChart.destroy(); // Destroy old chart before re-drawing
+            
+            doughnutChart = new Chart(ctxDoughnut, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Clean Traffic', 'Malicious (Blocked)'],
+                    datasets: [{
+                        data: [cleanCount, maliciousCount],
+                        backgroundColor: ['rgba(46, 160, 67, 0.8)', 'rgba(248, 81, 73, 0.8)'],
+                        borderColor: ['#2ea043', '#f85149'],
+                        borderWidth: 1,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+
+            // 2. Render Top Domains Bar Chart
+            // Sort domains by attack frequency
+            const sortedDomains = Object.keys(domainCounts).sort((a,b) => domainCounts[b] - domainCounts[a]).slice(0, 5);
+            const domainData = sortedDomains.map(d => domainCounts[d]);
+
+            const ctxBar = document.getElementById('domainBarChart').getContext('2d');
+            if(barChart) barChart.destroy();
+            
+            barChart = new Chart(ctxBar, {
+                type: 'bar',
+                data: {
+                    labels: sortedDomains.length > 0 ? sortedDomains : ['No Data'],
+                    datasets: [{
+                        label: 'Attack Attempts',
+                        data: domainData.length > 0 ? domainData : [0],
+                        backgroundColor: 'rgba(88, 166, 255, 0.6)',
+                        borderColor: '#58a6ff',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#30363d' }, ticks: { stepSize: 1 } },
+                        x: { grid: { display: false } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+        
+        // Tab switching logic to fix visual glitches
+        document.querySelectorAll('button[data-bs-toggle="tab"]').forEach(tab => {
+            tab.addEventListener('shown.bs.tab', function (event) {
+                // Remove white text from all, make muted
+                document.querySelectorAll('.nav-link').forEach(btn => {
+                    btn.classList.remove('text-white');
+                    btn.classList.add('text-muted');
+                    btn.style.borderColor = "transparent";
+                });
+                // Add white text to active tab
+                event.target.classList.remove('text-muted');
+                event.target.classList.add('text-white');
+                event.target.style.borderColor = "#30363d #30363d transparent";
+            });
+        });
     </script>
 </body>
 </html>
